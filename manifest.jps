@@ -1,0 +1,59 @@
+type: update
+name: Adjust cp layer cloudlet limit to 10 CPU cores
+targetNodes:
+    nodeGroup: '*'   
+  
+settings:
+    main:
+    fields:
+   
+            - name: cores
+              caption: Cores target wanted
+              type: string
+              required: true
+              regex: "^[0-9]$|^[0-1][0]$"
+              regexText: "1-10"
+              
+              
+nodeGroupAlias:
+  ${targetNodes.nodeGroup}: selected
+  
+onInstall:
+    - cmd [${targetNodes.nodeGroup}]: cat /proc/cpuinfo | grep processor | wc -l
+    - if (${response.responses[0].out} != ${settings.cores}):
+        - cmd [${targetNodes.nodeGroup}]: cat /proc/cpuinfo | grep "cpu MHz" | awk '{print $4}' | head -n1
+        - script: |
+            var MHz = ${response.responses[0].out};
+            var Cores_up = ${settings.cores} + 1
+            var cloudlets = ${nodes.selected.flexibleCloudlets};
+            var nodes = ${nodes.selected}
+            jelastic.marketplace.console.WriteLog("nodeType :" + nodes)
+            cloudlets = Math.floor(${response.responses[0].out}/400) * Cores_up;
+            return {result:0, cloudlets: cloudlets }
+        - adjustCloudlets:
+            newLimit: ${response.cloudlets}   
+actions:
+    checkCores:
+        - cmd [${targetNodes.nodeGroup}]: cat /proc/cpuinfo | grep processor | wc -l        
+        - if (${response.responses[0].out} > ${settings.cores}):
+            - script: |
+                var cloudlets = ${nodes.selected.flexibleCloudlets};
+                cloudlets--;
+                return {result:0, cloudlets: cloudlets }
+            - adjustCloudlets:
+                newLimit: ${response.cloudlets}
+        - elif (${response.responses[0].out} < ${settings.cores}):
+            - script: |
+                var cloudlets = ${nodes.selected.flexibleCloudlets};
+                cloudlets++;
+                return {result:0, cloudlets: cloudlets }
+            - adjustCloudlets:
+                newLimit: ${response.cloudlets}
+            
+    adjustCloudlets:
+        - env.control.SetCloudletsCountByGroup:
+            envName: ${env.envName}
+            nodeGroup: ${targetNodes.nodeGroup}
+            fixedCloudlets: ${nodes.selected.fixedCloudlets}
+            flexibleCloudlets: ${this.newLimit}
+        - checkCores
